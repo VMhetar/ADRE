@@ -5,7 +5,7 @@ Defines all fundamental data types and enums
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict
+from typing import List, Dict, Optional
 from enum import Enum
 import uuid
 
@@ -121,7 +121,7 @@ class BeliefState:
             'last_updated': self.last_updated.isoformat()
         }
 
-    def to_training_format(self) -> Dict|None:
+    def to_training_format(self) -> Dict:
         """Convert belief to training data format"""
         if self.status not in ["stable", "contextual"]:
             return None

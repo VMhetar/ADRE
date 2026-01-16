@@ -208,7 +208,39 @@ async def example_export():
 
 
 # ============================================================================
-# EXAMPLE 7: Using OpenRouter LLM Integration
+# EXAMPLE 6: Belief History Tracking
+# ============================================================================
+
+async def example_history():
+    """Example showing belief history tracking."""
+    print("\n" + "="*70)
+    print("EXAMPLE 6: Belief History Tracking")
+    print("="*70)
+    
+    belief_manager = BeliefManager()
+    pipeline = ADREPipeline(belief_manager=belief_manager, min_confidence=0.2)
+    
+    raw_data = """
+    Renewable energy adoption is accelerating globally.
+    Electric vehicles are becoming more affordable and available.
+    """
+    
+    beliefs = await pipeline.process_raw_data(raw_data, verbose=False)
+    
+    # Show history for each belief
+    print("\nBelief History:")
+    for belief in beliefs:
+        print(f"\nClaim: {belief.claim.text[:50]}...")
+        print(f"Final Status: {belief.status}")
+        print(f"Final Confidence: {belief.confidence:.3f}")
+        
+        if belief.history:
+            print(f"History ({len(belief.history)} events):")
+            for event in belief.history[-3:]:  # Show last 3 events
+                print(f"  • {event['event']}: confidence={event['confidence']:.3f}")
+
+
+# ============================================================================
 # ============================================================================
 
 async def example_openrouter():
