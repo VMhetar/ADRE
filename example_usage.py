@@ -208,36 +208,94 @@ async def example_export():
 
 
 # ============================================================================
-# EXAMPLE 6: Belief History Tracking
+# EXAMPLE 7: Using OpenRouter LLM Integration
 # ============================================================================
 
-async def example_history():
-    """Example showing belief history tracking."""
+async def example_openrouter():
+    """Example using OpenRouter for claim extraction."""
     print("\n" + "="*70)
-    print("EXAMPLE 6: Belief History Tracking")
+    print("EXAMPLE 7: OpenRouter LLM Integration")
     print("="*70)
     
-    belief_manager = BeliefManager()
-    pipeline = ADREPipeline(belief_manager=belief_manager, min_confidence=0.2)
+    # Check if API key is set
+    if not os.getenv("OPENROUTER_API_KEY"):
+        print("\n⚠️  OPENROUTER_API_KEY not set")
+        print("   Set it to use real LLM extraction:")
+        print("   export OPENROUTER_API_KEY='sk-...'")
+        print("\n   Using Mock LLM for demonstration instead...\n")
+        
+        # Use mock for demo
+        from adre_claim_extractor import PatternBasedExtractor
+        extractor = PatternBasedExtractor()
+    else:
+        # Use real OpenRouter LLM
+        print("\n✓ Using OpenRouter API\n")
+        extractor = LLMBasedExtractor(model="openai/gpt-3.5-turbo")
+    
+    pipeline = ADREPipeline(
+        extractor=extractor,
+        validator=MockValidator(),
+        min_confidence=0.3
+    )
     
     raw_data = """
-    Renewable energy adoption is accelerating globally.
-    Electric vehicles are becoming more affordable and available.
+    Artificial intelligence is rapidly advancing. Major breakthroughs occur regularly.
+    
+    The COVID-19 pandemic has changed how people work globally.
+    
+    Electric vehicles are becoming more affordable and widespread.
     """
     
-    beliefs = await pipeline.process_raw_data(raw_data, verbose=False)
+    beliefs = await pipeline.process_raw_data(raw_data, verbose=True)
     
-    # Show history for each belief
-    print("\nBelief History:")
-    for belief in beliefs:
-        print(f"\nClaim: {belief.claim.text[:50]}...")
-        print(f"Final Status: {belief.status}")
-        print(f"Final Confidence: {belief.confidence:.3f}")
+    print(f"\n✓ Processed with LLM-based extraction")
+    print(f"✓ Generated {len(pipeline.get_training_data())} training-ready items")
+
+
+# ============================================================================
+# EXAMPLE 8: Comparison - Pattern vs LLM Extraction
+# ============================================================================
+
+async def example_comparison():
+    """Compare pattern-based vs LLM-based extraction."""
+    print("\n" + "="*70)
+    print("EXAMPLE 8: Pattern vs LLM Extraction")
+    print("="*70)
+    
+    raw_data = """
+    Machine learning models require high-quality training data to perform well.
+    Recent studies show that data quality matters more than data quantity.
+    The field of AI is evolving rapidly with new techniques emerging monthly.
+    """
+    
+    # Pattern-based
+    print("\n[PATTERN-BASED]")
+    pipeline1 = ADREPipeline(
+        extractor=PatternBasedExtractor(),
+        validator=MockValidator(),
+        min_confidence=0.3
+    )
+    beliefs1 = await pipeline1.process_raw_data(raw_data, verbose=False)
+    stats1 = pipeline1.get_statistics()
+    
+    print(f"Claims extracted: {stats1['total_processed']}")
+    print(f"Avg confidence: {stats1['average_confidence']:.3f}")
+    
+    # LLM-based (if available)
+    if os.getenv("OPENROUTER_API_KEY"):
+        print("\n[LLM-BASED]")
+        pipeline2 = ADREPipeline(
+            extractor=LLMBasedExtractor(),
+            validator=MockValidator(),
+            min_confidence=0.3
+        )
+        beliefs2 = await pipeline2.process_raw_data(raw_data, verbose=False)
+        stats2 = pipeline2.get_statistics()
         
-        if belief.history:
-            print(f"History ({len(belief.history)} events):")
-            for event in belief.history[-3:]:  # Show last 3 events
-                print(f"  • {event['event']}: confidence={event['confidence']:.3f}")
+        print(f"Claims extracted: {stats2['total_processed']}")
+        print(f"Avg confidence: {stats2['average_confidence']:.3f}")
+    else:
+        print("\n⚠️  OpenRouter API key not set, skipping LLM comparison")
 
 
 # ============================================================================
@@ -257,6 +315,8 @@ async def main():
     await example_batch()
     await example_export()
     await example_history()
+    await example_openrouter()
+    await example_comparison()
     
     print("\n" + "="*80)
     print("✓ All examples completed successfully")

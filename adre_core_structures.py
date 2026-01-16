@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict
 from enum import Enum
+import uuid
 
 
 class ClaimType(Enum):
