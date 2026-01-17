@@ -329,6 +329,79 @@ async def example_comparison():
     else:
         print("\n⚠️  OpenRouter API key not set, skipping LLM comparison")
 
+# ============================================================================
+# EXAMPLE 9: Wikipedia Dataset Integration (Modern HF Dataset)
+# ============================================================================
+
+from datasets import load_dataset
+
+async def example_wikipedia():
+    """Example processing AG news dataset with ADRE."""
+    print("\n" + "="*70)
+    print("EXAMPLE 9: Wikipedia Dataset Integration")
+    print("="*70)
+
+    # Initialize pipeline
+    pipeline = ADREPipeline(min_confidence=0.6)
+
+    # Load modern, script-free Wikipedia dataset (Parquet-based)
+    print("\nLoading Tweet dataset...")
+    raw_ds = load_dataset(
+        "civil_comments",
+        split="train[:300]"   # small, fast, enough signal
+    )
+
+    # Materialize text column into a concrete list[str]
+    texts: list[str] = list(raw_ds["text"])
+
+    # Preserve document boundaries
+    raw_text = "\n\n \n\n".join(texts)
+
+    print(f"✓ Loaded {len(texts)} articles")
+    print(f"✓ Raw text size: {len(raw_text):,} characters")
+    print(f"✓ Raw token estimate: {len(raw_text.split()):,}")
+
+    # Process with ADRE
+    beliefs = await pipeline.process_raw_data(raw_text, verbose=False)
+
+    # Collect statistics
+    stats = pipeline.get_statistics()
+    training_data = pipeline.get_training_data()
+
+    # Reduction metrics (use internal Belief objects)
+    filtered_char_size = sum(len(belief.claim.text) for belief in beliefs)
+    filtered_token_size = sum(len(belief.claim.text.split()) for belief in beliefs)
+
+    print("\nResults Summary:")
+    print(f"  Total Claims Processed: {stats['total_processed']}")
+    print(f"  Stable: {stats['stable']}")
+    print(f"  Contextual: {stats['contextual']}")
+    print(f"  Speculative: {stats['speculative']}")
+    print(f"  Rejected: {stats['rejected']}")
+    print(f"  Average Confidence: {stats['average_confidence']:.3f}")
+    print(f"  Acceptance Rate: {stats['acceptance_rate']:.1%}")
+    print(f"  Training-Ready Items: {len(training_data)}")
+
+    print("\nData Reduction:")
+    print(f"  Raw Size (chars): {len(raw_text):,}")
+    print(f"  Filtered Size (chars): {filtered_char_size:,}")
+    print(f"  Char Reduction Ratio: {filtered_char_size / len(raw_text):.3f}")
+
+    print(f"  Raw Tokens (approx): {len(raw_text.split()):,}")
+    print(f"  Filtered Tokens: {filtered_token_size:,}")
+    print(f"  Token Reduction Ratio: {filtered_token_size / len(raw_text.split()):.3f}")
+
+    # Show sample validated beliefs (object-level)
+    print("\nSample Validated Claims:")
+    for belief in beliefs[:5]:
+        print(f"  • {belief.claim.text[:80]}...")
+        print(
+            f"    Confidence: {belief.confidence:.3f}, "
+            f"Evidence: {len(belief.evidence)} sources, "
+            f"Status: {belief.status}"
+        )
+
+    print("\n✓ Wikipedia example completed successfully")
 
 # ============================================================================
 # MAIN RUNNER
@@ -349,7 +422,7 @@ async def main():
     await example_history()
     await example_openrouter()
     await example_comparison()
-    
+    await example_wikipedia()
     print("\n" + "="*80)
     print("✓ All examples completed successfully")
     print("="*80 + "\n")
