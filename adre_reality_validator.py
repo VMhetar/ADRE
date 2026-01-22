@@ -1,225 +1,180 @@
 """
-ADRE Claim Extraction Layer
-Extracts structured claims from raw unstructured data
+ADRE Reality Validation Layer
+Validates claims against multiple external sources
 """
 
 from abc import ABC, abstractmethod
-from typing import List
+from typing import List, Dict, Optional
 from datetime import datetime, timezone
-import re
-import uuid
+import asyncio
 
-from adre_core_structures import Claim, ClaimType
+from adre_core_structures import Evidence, Claim, ClaimType
 
 
-class ClaimExtractor(ABC):
-    """Base class for claim extraction strategies."""
+class RealityValidator(ABC):
+    """Base class for reality validation strategies."""
 
     @abstractmethod
-    def extract(self, raw_data: str) -> List[Claim]:
-        """Extract claims from raw data."""
+    async def validate(self, claim: Claim) -> List[Evidence]:
+        """Validate claim against reality sources."""
         pass
 
 
-class PatternBasedExtractor(ClaimExtractor):
+class MockValidator(RealityValidator):
     """
-    Pattern-based claim extraction.
-    Fast, no external dependencies, no I/O.
+    Deterministic mock validator for testing.
+    Generates reproducible evidence based on claim characteristics.
+    """
+
+    def __init__(self, seed: int = 42):
+        """
+        Initialize mock validator.
+        
+        Args:
+            seed: Seed for deterministic behavior (not used for random, but for hashing)
+        """
+        self.seed = seed
+        self.sources = [
+            ('official_db', 'official', 0.95),
+            ('academic_journal', 'academic', 0.90),
+            ('news_outlet_1', 'news', 0.75),
+            ('news_outlet_2', 'news', 0.75),
+            ('government_api', 'official', 0.92),
+        ]
+
+    async def validate(self, claim: Claim) -> List[Evidence]:
+        """Generate deterministic evidence based on claim hash."""
+        evidence_list = []
+        
+        # Deterministic selection based on claim text hash
+        text_hash = hash(claim.text) % 100
+        num_sources = 2 + (text_hash % 4)  # 2-5 sources
+        
+        for i in range(min(num_sources, len(self.sources))):
+            source_id, source_type, reliability = self.sources[i]
+            
+            # Deterministic support strength
+            support = self._compute_support(claim, i, text_hash)
+            
+            evidence = Evidence(
+                source_id=f"{source_id}_{i}",
+                source_type=source_type,
+                support_strength=support,
+                reliability_score=reliability,
+                timestamp=datetime.now(timezone.utc),
+                content=f"Evidence from {source_id}: {claim.text[:50]}"
+            )
+            evidence_list.append(evidence)
+        
+        return evidence_list
+
+    def _compute_support(self, claim: Claim, source_idx: int, text_hash: int) -> float:
+        """Compute deterministic support strength based on claim type and hash."""
+        # Base support depends on claim type
+        type_base = {
+            ClaimType.STRUCTURAL: 0.8,
+            ClaimType.EMPIRICAL: 0.6,
+            ClaimType.DYNAMIC: 0.4,
+            ClaimType.NORMATIVE: 0.5
+        }
+        base = type_base.get(claim.claim_type, 0.5)
+        
+        # Vary by source (deterministic)
+        variation = ((text_hash + source_idx * 17) % 40 - 20) / 100  # -0.2 to +0.2
+        support = base + variation
+        
+        # 10% chance of contradiction (deterministic)
+        if (text_hash + source_idx) % 10 == 0:
+            support = -0.5 - (text_hash % 30) / 100
+        
+        return max(-1.0, min(1.0, support))
+
+
+class WebSearchValidator(RealityValidator):
+    """
+    Web search validation (placeholder - requires implementation).
+    """
+
+    def __init__(self, search_api_key: str = None, llm_service=None, max_sources: int = 5):
+        self.api_key = search_api_key
+        self.max_sources = max_sources
+        self.llm_service = llm_service
+        self.enabled = False  # Not implemented yet
+
+    async def validate(self, claim: Claim) -> List[Evidence]:
+        """Web search validation - not implemented."""
+        if not self.enabled:
+            return []
+        
+        # TODO: Implement web search
+        return []
+
+
+class APIValidator(RealityValidator):
+    """
+    API-based validation (placeholder - requires implementation).
     """
 
     def __init__(self):
-        # Strong claim indicators
-        self.factual_patterns = [
-            r'\b(?:is|are|was|were)\b.*\b(?:a|an|the)\b',
-            r'\b(?:has|have|had)\b.*\b(?:shown|demonstrated|proven)\b',
-            r'\b(?:research|studies|data|evidence)\b.*\b(?:shows?|indicates?|suggests?)\b',
-        ]
-        
-        # Compiled patterns
-        self.compiled = [re.compile(p, re.IGNORECASE) for p in self.factual_patterns]
+        self.enabled = False  # Not implemented yet
 
-    def extract(self, raw_data: str) -> List[Claim]:
-        """Extract claims using pattern matching - synchronous."""
-        claims = []
-        sentences = re.split(r'[.!?]+', raw_data)
+    async def validate(self, claim: Claim) -> List[Evidence]:
+        """API validation - not implemented."""
+        if not self.enabled:
+            return []
         
-        for sentence in sentences:
-            sentence = sentence.strip()
-            
-            if len(sentence) < 20:
-                continue
-            
-            # Check if matches factual patterns
-            if self._is_factual_claim(sentence):
-                claim_type = self._classify_claim_type(sentence)
-                confidence = self._estimate_confidence(sentence)
-                
-                claim = Claim(
-                    claim_id=f"claim_{uuid.uuid4().hex[:8]}",
-                    text=sentence,
-                    claim_type=claim_type,
-                    source_text=raw_data[:200],
-                    extraction_confidence=confidence,
-                    timestamp=datetime.now(timezone.utc)
-                )
-                claims.append(claim)
-        
-        return claims
-
-    def _is_factual_claim(self, text: str) -> bool:
-        """Check if text contains factual claim."""
-        return any(pattern.search(text) for pattern in self.compiled)
-
-    def _classify_claim_type(self, text: str) -> ClaimType:
-        """Classify claim type with stronger heuristics."""
-        lower = text.lower()
-        
-        # Normative - prescriptive language
-        normative_keywords = {'should', 'must', 'ought', 'need to', 'required', 'necessary'}
-        if any(kw in lower for kw in normative_keywords):
-            return ClaimType.NORMATIVE
-        
-        # Dynamic - time-sensitive indicators
-        dynamic_keywords = {'today', 'yesterday', 'currently', 'now', 'latest', 'recent'}
-        if any(kw in lower for kw in dynamic_keywords):
-            return ClaimType.DYNAMIC
-        
-        # Empirical - research/data language
-        empirical_keywords = {'study', 'research', 'data shows', 'experiment', 'findings', 'evidence'}
-        if any(kw in lower for kw in empirical_keywords):
-            return ClaimType.EMPIRICAL
-        
-        # Structural - definitional/mathematical
-        structural_keywords = {'defined as', 'equals', 'always', 'never', 'formula', 'theorem'}
-        if any(kw in lower for kw in structural_keywords):
-            return ClaimType.STRUCTURAL
-        
-        # Default to empirical
-        return ClaimType.EMPIRICAL
-
-    def _estimate_confidence(self, text: str) -> float:
-        """Estimate extraction confidence based on claim strength."""
-        lower = text.lower()
-        confidence = 0.5
-        
-        # Strong indicators boost confidence
-        strong_words = {'proven', 'demonstrated', 'established', 'confirmed'}
-        if any(w in lower for w in strong_words):
-            confidence += 0.2
-        
-        # Hedging reduces confidence
-        hedge_words = {'might', 'could', 'possibly', 'perhaps', 'maybe'}
-        if any(w in lower for w in hedge_words):
-            confidence -= 0.15
-        
-        # Length factor
-        if len(text.split()) > 15:
-            confidence += 0.1
-        
-        return max(0.3, min(0.95, confidence))
+        # TODO: Implement API queries
+        return []
 
 
-class LLMBasedExtractor(ClaimExtractor):
+class MultiSourceValidator(RealityValidator):
     """
-    LLM-powered claim extraction using OpenRouter.
-    More sophisticated but requires API access.
+    Orchestrates validation across multiple validators.
+    Only uses enabled validators.
     """
 
-    def __init__(self, llm_api_key: str = None, model: str = "openai/gpt-3.5-turbo"):
-        from adre_llm_service import OpenRouterLLMService, LLMClaimExtractor, LLMClaimClassifier
+    def __init__(self, include_mock: bool = True):
+        self.validators = []
         
-        try:
-            self.llm_service = OpenRouterLLMService(api_key=llm_api_key, model=model)
-            self.claim_extractor = LLMClaimExtractor(self.llm_service)
-            self.classifier = LLMClaimClassifier(self.llm_service)
-            self.fallback = PatternBasedExtractor()
-        except Exception as e:
-            raise ValueError(f"Failed to initialize LLM service: {e}")
+        if include_mock:
+            self.validators.append(MockValidator())
+        
+        # Add other validators when implemented
+        # self.validators.append(WebSearchValidator())
+        # self.validators.append(APIValidator())
 
-    def extract(self, raw_data: str) -> List[Claim]:
-        """Extract claims using OpenRouter LLM with fallback - synchronous wrapper."""
-        import asyncio
+    async def validate(self, claim: Claim) -> List[Evidence]:
+        """Validate across all enabled validators."""
+        if not self.validators:
+            # Fallback to mock if no validators
+            mock = MockValidator()
+            return await mock.validate(claim)
         
-        try:
-            # Get or create event loop
-            try:
-                loop = asyncio.get_running_loop()
-                # Already in async context - create task
-                return asyncio.create_task(self._async_extract(raw_data))
-            except RuntimeError:
-                # No running loop - create new one
-                return asyncio.run(self._async_extract(raw_data))
-        except Exception as e:
-            print(f"LLM extraction failed: {e}, using fallback")
-            return self.fallback.extract(raw_data)
-
-    async def _async_extract(self, raw_data: str) -> List[Claim]:
-        """Async extraction logic."""
-        extracted = await self.claim_extractor.extract_claims(raw_data)
+        # Run all validators in parallel
+        tasks = [validator.validate(claim) for validator in self.validators]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        if not extracted:
-            print("No claims extracted by LLM, using fallback")
-            return self.fallback.extract(raw_data)
-        
-        claims = []
-        for item in extracted:
-            claim_text = item.get("claim", "")
-            if not claim_text:
+        # Combine results, filter errors
+        all_evidence = []
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Validator failed: {result}")
                 continue
-                
-            extraction_conf = float(item.get("confidence", 0.7))
-            
-            # Classify claim type
-            claim_type_str = await self.classifier.classify(claim_text)
-            claim_type = self._string_to_claim_type(claim_type_str)
-            
-            claim = Claim(
-                claim_id=f"claim_llm_{uuid.uuid4().hex[:8]}",
-                text=claim_text,
-                claim_type=claim_type,
-                source_text=raw_data[:200],
-                extraction_confidence=extraction_conf,
-                timestamp=datetime.now(timezone.utc)
-            )
-            claims.append(claim)
+            all_evidence.extend(result)
         
-        return claims
+        # Deduplicate by source
+        return self._deduplicate(all_evidence)
 
     @staticmethod
-    def _string_to_claim_type(type_str: str) -> ClaimType:
-        """Convert string to ClaimType enum."""
-        type_map = {
-            'STRUCTURAL': ClaimType.STRUCTURAL,
-            'EMPIRICAL': ClaimType.EMPIRICAL,
-            'DYNAMIC': ClaimType.DYNAMIC,
-            'NORMATIVE': ClaimType.NORMATIVE
-        }
-        return type_map.get(type_str.upper(), ClaimType.EMPIRICAL)
-
-
-class HybridExtractor(ClaimExtractor):
-    """
-    Hybrid: fast patterns + optional LLM refinement.
-    Best of both worlds.
-    """
-
-    def __init__(self, llm_api_key: str = None):
-        self.pattern_extractor = PatternBasedExtractor()
-        try:
-            self.llm_extractor = LLMBasedExtractor(llm_api_key)
-            self.has_llm = True
-        except:
-            self.has_llm = False
-
-    def extract(self, raw_data: str) -> List[Claim]:
-        """Extract with pattern first, optionally refine with LLM."""
-        pattern_claims = self.pattern_extractor.extract(raw_data)
+    def _deduplicate(evidence_list: List[Evidence]) -> List[Evidence]:
+        """Remove duplicate evidence from same source."""
+        seen = set()
+        unique = []
         
-        if not self.has_llm:
-            return pattern_claims
+        for evidence in evidence_list:
+            key = (evidence.source_id, evidence.source_type)
+            if key not in seen:
+                seen.add(key)
+                unique.append(evidence)
         
-        # Boost confidence for hybrid extraction
-        for claim in pattern_claims:
-            claim.extraction_confidence = min(0.9, claim.extraction_confidence + 0.1)
-        
-        return pattern_claims
+        return unique
