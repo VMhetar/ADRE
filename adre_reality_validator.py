@@ -1,307 +1,225 @@
 """
-ADRE Reality Validation Layer
-Validates claims against multiple external sources
+ADRE Claim Extraction Layer
+Extracts structured claims from raw unstructured data
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional
+from typing import List
 from datetime import datetime, timezone
-import asyncio
-import random
+import re
+import uuid
 
-from adre_core_structures import Evidence, Claim
+from adre_core_structures import Claim, ClaimType
 
 
-class RealityValidator(ABC):
-    """
-    Abstract base class for reality validation strategies.
-    Implementers gather evidence from various sources to validate claims.
-    """
+class ClaimExtractor(ABC):
+    """Base class for claim extraction strategies."""
 
     @abstractmethod
-    async def validate(self, claim: Claim) -> List[Evidence]:
-        """
-        Validate claim against reality sources.
-        
-        Args:
-            claim: Claim to validate
-            
-        Returns:
-            List of Evidence objects (supporting or contradicting)
-        """
+    def extract(self, raw_data: str) -> List[Claim]:
+        """Extract claims from raw data."""
         pass
 
 
-class MockValidator(RealityValidator):
+class PatternBasedExtractor(ClaimExtractor):
     """
-    Mock validator for testing and demonstration.
-    Simulates evidence gathering without real API calls.
-    """
-
-    def __init__(self):
-        self.mock_sources = {
-            'official_db': {'type': 'official', 'reliability': 0.95},
-            'academic_journal': {'type': 'academic', 'reliability': 0.90},
-            'news_outlet_1': {'type': 'news', 'reliability': 0.75},
-            'news_outlet_2': {'type': 'news', 'reliability': 0.75},
-            'government_api': {'type': 'official', 'reliability': 0.92},
-            'sensor_network': {'type': 'api', 'reliability': 0.88},
-            'social_media': {'type': 'social_media', 'reliability': 0.30},
-        }
-
-    async def validate(self, claim: Claim) -> List[Evidence]:
-        """
-        Simulate evidence collection.
-        
-        Args:
-            claim: Claim to validate
-            
-        Returns:
-            List of simulated Evidence objects
-        """
-        evidence_list = []
-        
-        # Simulate checking multiple sources
-        num_sources = random.randint(2, 5)
-        selected_sources = random.sample(
-            list(self.mock_sources.items()),
-            min(num_sources, len(self.mock_sources))
-        )
-        
-        for source_id, source_info in selected_sources:
-            # Simulate evidence with realistic distribution
-            support_strength = self._generate_support_strength()
-            
-            evidence = Evidence(
-                source_id=source_id,
-                source_type=source_info['type'],
-                support_strength=support_strength,
-                reliability_score=source_info['reliability'],
-                timestamp=datetime.now(timezone.utc),
-                content=f"Evidence from {source_id} relevant to: {claim.text[:50]}"
-            )
-            evidence_list.append(evidence)
-        
-        return evidence_list
-
-    def _generate_support_strength(self) -> float:
-        """
-        Generate realistic support strength distribution.
-        Most evidence supports, few contradict.
-        
-        Returns:
-            Support strength (-1.0 to 1.0)
-        """
-        rand = random.random()
-        
-        # 80% supporting evidence
-        if rand < 0.80:
-            return random.uniform(0.5, 1.0)
-        # 10% neutral
-        elif rand < 0.90:
-            return random.uniform(-0.1, 0.1)
-        # 10% contradicting
-        else:
-            return random.uniform(-0.8, -0.3)
-
-
-class WebSearchValidator(RealityValidator):
-    """
-    Validates claims by searching the web.
-    Integrates with web search APIs (Google, Bing, etc.)
-    Uses LLM to analyze search results for evidence.
-    """
-
-    def __init__(self, search_api_key: str = None, llm_service = None, max_sources: int = 5):
-        """
-        Initialize web search validator.
-        
-        Args:
-            search_api_key: API key for search service
-            llm_service: LLMService instance for analyzing results
-            max_sources: Maximum sources to check per claim
-        """
-        self.api_key = search_api_key
-        self.max_sources = max_sources
-        self.llm_service = llm_service
-        
-        if llm_service is None:
-            try:
-                from adre_llm_service import OpenRouterLLMService, LLMEvidenceAnalyzer
-                self.llm_service = OpenRouterLLMService()
-                self.evidence_analyzer = LLMEvidenceAnalyzer(self.llm_service)
-            except:
-                self.evidence_analyzer = None
-
-    async def validate(self, claim: Claim) -> List[Evidence]:
-        """
-        Search web for evidence about claim.
-        
-        Args:
-            claim: Claim to validate
-            
-        Returns:
-            List of Evidence from web sources
-        """
-        # This would integrate with actual web search API
-        # For now, returning empty list - implementation pending
-        
-        try:
-            # Would perform: search_results = await self._web_search(claim.text)
-            # Then analyze with LLM: strength = await self.evidence_analyzer.analyze_evidence(...)
-            # Finally convert to Evidence objects
-            return []
-        except Exception as e:
-            print(f"Web search validation failed: {e}")
-            return []
-
-    async def _web_search(self, query: str) -> List[Dict]:
-        """
-        Perform web search (placeholder).
-        Integration point for Google Search API, Bing, or similar.
-        
-        Args:
-            query: Search query
-            
-        Returns:
-            List of search results with url, title, snippet
-        """
-        # TODO: Implement with actual search API
-        # Example structure:
-        # return [
-        #     {
-        #         'url': 'https://...',
-        #         'title': '...',
-        #         'snippet': '...',
-        #         'source': 'google'
-        #     }
-        # ]
-        pass
-
-
-class APIValidator(RealityValidator):
-    """
-    Validates claims by querying data APIs.
-    Suitable for factual data: weather, finance, sensor data, etc.
+    Pattern-based claim extraction.
+    Fast, no external dependencies, no I/O.
     """
 
     def __init__(self):
-        self.api_endpoints = {
-            'weather': 'https://api.weather.example.com',
-            'finance': 'https://api.finance.example.com',
-            'sensors': 'https://api.sensors.example.com',
-        }
-
-    async def validate(self, claim: Claim) -> List[Evidence]:
-        """
-        Validate claim against data APIs.
-        
-        Args:
-            claim: Claim to validate
-            
-        Returns:
-            List of Evidence from APIs
-        """
-        evidence_list = []
-        
-        try:
-            # Determine which API is relevant
-            api_type = self._determine_api_type(claim.text)
-            
-            if api_type:
-                # Would call: data = await self._query_api(api_type, claim)
-                # Then convert to Evidence
-                pass
-        
-        except Exception as e:
-            print(f"API validation failed: {e}")
-        
-        return evidence_list
-
-    def _determine_api_type(self, claim_text: str) -> Optional[str]:
-        """
-        Determine which API endpoint is relevant for claim.
-        
-        Args:
-            claim_text: Claim text
-            
-        Returns:
-            API type or None
-        """
-        claim_lower = claim_text.lower()
-        
-        if any(word in claim_lower for word in ['weather', 'temperature', 'rain']):
-            return 'weather'
-        elif any(word in claim_lower for word in ['price', 'market', 'stock']):
-            return 'finance'
-        elif any(word in claim_lower for word in ['sensor', 'measurement', 'reading']):
-            return 'sensors'
-        
-        return None
-
-
-class MultiSourceValidator(RealityValidator):
-    """
-    Orchestrates validation across multiple validator types.
-    Combines results from web search, APIs, academic sources, etc.
-    """
-
-    def __init__(self):
-        self.validators = [
-            MockValidator(),  # For testing
-            WebSearchValidator(),
-            APIValidator(),
-        ]
-
-    async def validate(self, claim: Claim) -> List[Evidence]:
-        """
-        Validate claim across multiple sources.
-        
-        Args:
-            claim: Claim to validate
-            
-        Returns:
-            Combined list of Evidence from all validators
-        """
-        all_evidence = []
-        
-        # Run all validators in parallel
-        tasks = [
-            validator.validate(claim)
-            for validator in self.validators
+        # Strong claim indicators
+        self.factual_patterns = [
+            r'\b(?:is|are|was|were)\b.*\b(?:a|an|the)\b',
+            r'\b(?:has|have|had)\b.*\b(?:shown|demonstrated|proven)\b',
+            r'\b(?:research|studies|data|evidence)\b.*\b(?:shows?|indicates?|suggests?)\b',
         ]
         
-        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Compiled patterns
+        self.compiled = [re.compile(p, re.IGNORECASE) for p in self.factual_patterns]
+
+    def extract(self, raw_data: str) -> List[Claim]:
+        """Extract claims using pattern matching - synchronous."""
+        claims = []
+        sentences = re.split(r'[.!?]+', raw_data)
         
-        # Combine results, filtering out errors
-        for result in results:
-            if isinstance(result, Exception):
+        for sentence in sentences:
+            sentence = sentence.strip()
+            
+            if len(sentence) < 20:
                 continue
-            all_evidence.extend(result)
+            
+            # Check if matches factual patterns
+            if self._is_factual_claim(sentence):
+                claim_type = self._classify_claim_type(sentence)
+                confidence = self._estimate_confidence(sentence)
+                
+                claim = Claim(
+                    claim_id=f"claim_{uuid.uuid4().hex[:8]}",
+                    text=sentence,
+                    claim_type=claim_type,
+                    source_text=raw_data[:200],
+                    extraction_confidence=confidence,
+                    timestamp=datetime.now(timezone.utc)
+                )
+                claims.append(claim)
         
-        # Deduplicate evidence from same source
-        unique_evidence = self._deduplicate(all_evidence)
+        return claims
+
+    def _is_factual_claim(self, text: str) -> bool:
+        """Check if text contains factual claim."""
+        return any(pattern.search(text) for pattern in self.compiled)
+
+    def _classify_claim_type(self, text: str) -> ClaimType:
+        """Classify claim type with stronger heuristics."""
+        lower = text.lower()
         
-        return unique_evidence
+        # Normative - prescriptive language
+        normative_keywords = {'should', 'must', 'ought', 'need to', 'required', 'necessary'}
+        if any(kw in lower for kw in normative_keywords):
+            return ClaimType.NORMATIVE
+        
+        # Dynamic - time-sensitive indicators
+        dynamic_keywords = {'today', 'yesterday', 'currently', 'now', 'latest', 'recent'}
+        if any(kw in lower for kw in dynamic_keywords):
+            return ClaimType.DYNAMIC
+        
+        # Empirical - research/data language
+        empirical_keywords = {'study', 'research', 'data shows', 'experiment', 'findings', 'evidence'}
+        if any(kw in lower for kw in empirical_keywords):
+            return ClaimType.EMPIRICAL
+        
+        # Structural - definitional/mathematical
+        structural_keywords = {'defined as', 'equals', 'always', 'never', 'formula', 'theorem'}
+        if any(kw in lower for kw in structural_keywords):
+            return ClaimType.STRUCTURAL
+        
+        # Default to empirical
+        return ClaimType.EMPIRICAL
+
+    def _estimate_confidence(self, text: str) -> float:
+        """Estimate extraction confidence based on claim strength."""
+        lower = text.lower()
+        confidence = 0.5
+        
+        # Strong indicators boost confidence
+        strong_words = {'proven', 'demonstrated', 'established', 'confirmed'}
+        if any(w in lower for w in strong_words):
+            confidence += 0.2
+        
+        # Hedging reduces confidence
+        hedge_words = {'might', 'could', 'possibly', 'perhaps', 'maybe'}
+        if any(w in lower for w in hedge_words):
+            confidence -= 0.15
+        
+        # Length factor
+        if len(text.split()) > 15:
+            confidence += 0.1
+        
+        return max(0.3, min(0.95, confidence))
+
+
+class LLMBasedExtractor(ClaimExtractor):
+    """
+    LLM-powered claim extraction using OpenRouter.
+    More sophisticated but requires API access.
+    """
+
+    def __init__(self, llm_api_key: str = None, model: str = "openai/gpt-3.5-turbo"):
+        from adre_llm_service import OpenRouterLLMService, LLMClaimExtractor, LLMClaimClassifier
+        
+        try:
+            self.llm_service = OpenRouterLLMService(api_key=llm_api_key, model=model)
+            self.claim_extractor = LLMClaimExtractor(self.llm_service)
+            self.classifier = LLMClaimClassifier(self.llm_service)
+            self.fallback = PatternBasedExtractor()
+        except Exception as e:
+            raise ValueError(f"Failed to initialize LLM service: {e}")
+
+    def extract(self, raw_data: str) -> List[Claim]:
+        """Extract claims using OpenRouter LLM with fallback - synchronous wrapper."""
+        import asyncio
+        
+        try:
+            # Get or create event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # Already in async context - create task
+                return asyncio.create_task(self._async_extract(raw_data))
+            except RuntimeError:
+                # No running loop - create new one
+                return asyncio.run(self._async_extract(raw_data))
+        except Exception as e:
+            print(f"LLM extraction failed: {e}, using fallback")
+            return self.fallback.extract(raw_data)
+
+    async def _async_extract(self, raw_data: str) -> List[Claim]:
+        """Async extraction logic."""
+        extracted = await self.claim_extractor.extract_claims(raw_data)
+        
+        if not extracted:
+            print("No claims extracted by LLM, using fallback")
+            return self.fallback.extract(raw_data)
+        
+        claims = []
+        for item in extracted:
+            claim_text = item.get("claim", "")
+            if not claim_text:
+                continue
+                
+            extraction_conf = float(item.get("confidence", 0.7))
+            
+            # Classify claim type
+            claim_type_str = await self.classifier.classify(claim_text)
+            claim_type = self._string_to_claim_type(claim_type_str)
+            
+            claim = Claim(
+                claim_id=f"claim_llm_{uuid.uuid4().hex[:8]}",
+                text=claim_text,
+                claim_type=claim_type,
+                source_text=raw_data[:200],
+                extraction_confidence=extraction_conf,
+                timestamp=datetime.now(timezone.utc)
+            )
+            claims.append(claim)
+        
+        return claims
 
     @staticmethod
-    def _deduplicate(evidence_list: List[Evidence]) -> List[Evidence]:
-        """
-        Remove duplicate evidence from same source.
+    def _string_to_claim_type(type_str: str) -> ClaimType:
+        """Convert string to ClaimType enum."""
+        type_map = {
+            'STRUCTURAL': ClaimType.STRUCTURAL,
+            'EMPIRICAL': ClaimType.EMPIRICAL,
+            'DYNAMIC': ClaimType.DYNAMIC,
+            'NORMATIVE': ClaimType.NORMATIVE
+        }
+        return type_map.get(type_str.upper(), ClaimType.EMPIRICAL)
+
+
+class HybridExtractor(ClaimExtractor):
+    """
+    Hybrid: fast patterns + optional LLM refinement.
+    Best of both worlds.
+    """
+
+    def __init__(self, llm_api_key: str = None):
+        self.pattern_extractor = PatternBasedExtractor()
+        try:
+            self.llm_extractor = LLMBasedExtractor(llm_api_key)
+            self.has_llm = True
+        except:
+            self.has_llm = False
+
+    def extract(self, raw_data: str) -> List[Claim]:
+        """Extract with pattern first, optionally refine with LLM."""
+        pattern_claims = self.pattern_extractor.extract(raw_data)
         
-        Args:
-            evidence_list: Evidence to deduplicate
-            
-        Returns:
-            Deduplicated evidence list
-        """
-        seen = set()
-        unique = []
+        if not self.has_llm:
+            return pattern_claims
         
-        for evidence in evidence_list:
-            key = (evidence.source_id, evidence.source_type)
-            if key not in seen:
-                seen.add(key)
-                unique.append(evidence)
+        # Boost confidence for hybrid extraction
+        for claim in pattern_claims:
+            claim.extraction_confidence = min(0.9, claim.extraction_confidence + 0.1)
         
-        return unique
+        return pattern_claims
