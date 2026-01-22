@@ -12,31 +12,16 @@ from adre_epistemic_engine import EpistemicEngine
 
 class BeliefManager:
     """
-    Manages the lifecycle of belief states.
-    Handles confidence updates, status changes, and historical tracking.
+    Manages belief lifecycle.
+    Handles confidence updates, status changes, and minimal history tracking.
     """
 
     def __init__(self, epistemic_engine: EpistemicEngine = None):
-        """
-        Initialize belief manager.
-        
-        Args:
-            epistemic_engine: Engine for confidence computation (optional)
-        """
         self.engine = epistemic_engine or EpistemicEngine()
         self.beliefs: Dict[str, BeliefState] = {}
 
     def create_belief(self, claim: Claim, base_confidence: float = 0.5) -> BeliefState:
-        """
-        Create new belief state from claim.
-        
-        Args:
-            claim: Claim to create belief for
-            base_confidence: Initial confidence level
-            
-        Returns:
-            New BeliefState object
-        """
+        """Create new belief state from claim."""
         belief = BeliefState(
             claim=claim,
             confidence=base_confidence,
@@ -46,234 +31,110 @@ class BeliefManager:
         return belief
 
     def update_confidence(self, belief: BeliefState) -> float:
-        """
-        Recompute confidence based on evidence.
-        Updates uncertainty as well.
-        
-        Args:
-            belief: BeliefState to update
-            
-        Returns:
-            New confidence value
-        """
+        """Recompute confidence based on evidence."""
         belief.confidence = self.engine.compute_confidence(
             evidence_list=belief.evidence,
             last_verified=belief.last_verified,
             claim_type=belief.claim.claim_type
         )
-        
         belief.uncertainty = self.engine.uncertainty_score(belief.confidence)
-        
         return belief.confidence
 
     def update_status(self, belief: BeliefState) -> str:
-        """
-        Update belief status based on current confidence.
-        Also logs change to history.
-        
-        Args:
-            belief: BeliefState to update
-            
-        Returns:
-            New status string
-        """
+        """Update belief status based on confidence."""
         old_status = belief.status
         belief.status = self.engine.belief_status(belief.confidence)
         belief.last_updated = datetime.now(timezone.utc)
         
-        # Log status change to history
         if belief.status != old_status:
-            self._log_to_history(belief, f"status_change_{old_status}_to_{belief.status}")
+            self._log_to_history(belief, f"status:{old_status}->{belief.status}")
         
         return belief.status
 
     def refresh_belief(self, belief: BeliefState) -> BeliefState:
-        """
-        Perform full refresh cycle:
-        1. Recompute confidence
-        2. Update status
-        3. Update timestamps
-        
-        Args:
-            belief: BeliefState to refresh
-            
-        Returns:
-            Updated BeliefState
-        """
+        """Full refresh: recompute confidence and update status."""
         self.update_confidence(belief)
         self.update_status(belief)
         belief.last_verified = datetime.now(timezone.utc)
-        
-        self._log_to_history(belief, "belief_refreshed")
-        
+        self._log_to_history(belief, "refresh")
         return belief
 
     def needs_refresh(self, belief: BeliefState) -> bool:
-        """
-        Check if belief needs refreshing based on type and age.
-        
-        Args:
-            belief: BeliefState to check
-            
-        Returns:
-            True if refresh is needed
-        """
+        """Check if belief needs refreshing based on type and age."""
         interval = REFRESH_INTERVALS[belief.claim.claim_type]
-        time_since_update = datetime.now(timezone.utc) - belief.last_updated
-        return time_since_update >= interval
+        time_since = datetime.now(timezone.utc) - belief.last_updated
+        return time_since >= interval
 
-    def update_evidence(
-        self,
-        belief: BeliefState,
-        new_evidence
-    ) -> BeliefState:
-        """
-        Add new evidence to belief and recompute.
-        
-        Args:
-            belief: BeliefState to update
-            new_evidence: Evidence object or list of Evidence
-            
-        Returns:
-            Updated BeliefState
-        """
+    def update_evidence(self, belief: BeliefState, new_evidence) -> BeliefState:
+        """Add new evidence and recompute confidence."""
         if isinstance(new_evidence, list):
             belief.evidence.extend(new_evidence)
         else:
             belief.evidence.append(new_evidence)
         
-        # Update contradiction count
+        # Update metadata
         belief.contradiction_count = sum(
-            1 for e in belief.evidence
-            if e.support_strength < 0
+            1 for e in belief.evidence if e.support_strength < 0
         )
         
-        # Update source diversity
         unique_sources = set(e.source_id for e in belief.evidence)
         belief.source_diversity = len(unique_sources) / len(belief.evidence) if belief.evidence else 0
         
-        # Recompute confidence and status
+        # Recompute
         self.update_confidence(belief)
         self.update_status(belief)
         
-        self._log_to_history(belief, f"evidence_updated_{len(new_evidence) if isinstance(new_evidence, list) else 1}")
+        num_new = len(new_evidence) if isinstance(new_evidence, list) else 1
+        self._log_to_history(belief, f"evidence:+{num_new}")
         
         return belief
 
+    def bulk_update(self, beliefs: List[BeliefState]) -> List[BeliefState]:
+        """Update multiple beliefs efficiently."""
+        for belief in beliefs:
+            self.update_confidence(belief)
+            self.update_status(belief)
+        return beliefs
+
     def get_belief(self, claim_id: str) -> Optional[BeliefState]:
-        """
-        Retrieve belief by claim ID.
-        
-        Args:
-            claim_id: ID of claim to retrieve
-            
-        Returns:
-            BeliefState or None if not found
-        """
+        """Retrieve belief by claim ID."""
         return self.beliefs.get(claim_id)
 
     def get_all_beliefs(self) -> List[BeliefState]:
-        """
-        Get all managed beliefs.
-        
-        Returns:
-            List of all BeliefState objects
-        """
+        """Get all managed beliefs."""
         return list(self.beliefs.values())
 
     def get_beliefs_by_status(self, status: str) -> List[BeliefState]:
-        """
-        Get all beliefs with specific status.
-        
-        Args:
-            status: Status to filter by ('rejected', 'speculative', 'contextual', 'stable')
-            
-        Returns:
-            List of BeliefState objects with matching status
-        """
+        """Get beliefs with specific status."""
         return [b for b in self.beliefs.values() if b.status == status]
 
     def get_beliefs_needing_refresh(self) -> List[BeliefState]:
-        """
-        Get all beliefs that need refreshing.
-        
-        Returns:
-            List of BeliefState objects needing refresh
-        """
+        """Get beliefs that need refreshing."""
         return [b for b in self.beliefs.values() if self.needs_refresh(b)]
 
     def _log_to_history(self, belief: BeliefState, event: str) -> None:
-        """
-        Log event to belief history.
-        
-        Args:
-            belief: BeliefState to log for
-            event: Event description
-        """
+        """Log event to belief history - minimal 3-field logging."""
         belief.history.append({
-            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'ts': datetime.now(timezone.utc).isoformat(),
             'event': event,
-            'status': belief.status,
-            'confidence': belief.confidence,
-            'evidence_count': len(belief.evidence),
-            'contradiction_count': belief.contradiction_count
+            'conf': round(belief.confidence, 3)
         })
 
     def get_history(self, claim_id: str) -> List[Dict]:
-        """
-        Get complete history for a belief.
-        
-        Args:
-            claim_id: ID of claim
-            
-        Returns:
-            List of historical events
-        """
+        """Get complete history for a belief."""
         belief = self.get_belief(claim_id)
         return belief.history if belief else []
 
     def downgrade_belief(self, belief: BeliefState, reason: str = "") -> BeliefState:
-        """
-        Manually downgrade belief to lower status.
-        Used when belief has too many contradictions or expires.
-        
-        Args:
-            belief: BeliefState to downgrade
-            reason: Reason for downgrade
-            
-        Returns:
-            Downgraded BeliefState
-        """
-        old_status = belief.status
-        belief.status = "speculative"
+        """Manually downgrade belief to lower status."""
         belief.confidence = max(0.0, belief.confidence - 0.2)
-        
-        self._log_to_history(
-            belief,
-            f"downgraded_from_{old_status}_{reason}"
-        )
-        
+        belief.status = self.engine.belief_status(belief.confidence)
+        self._log_to_history(belief, f"downgrade:{reason}")
         return belief
 
     def upgrade_belief(self, belief: BeliefState, reason: str = "") -> BeliefState:
-        """
-        Upgrade belief to higher status based on new evidence.
-        Used when contradicted beliefs recover or gain strong support.
-        
-        Args:
-            belief: BeliefState to upgrade
-            reason: Reason for upgrade
-            
-        Returns:
-            Upgraded BeliefState
-        """
-        old_status = belief.status
+        """Upgrade belief to higher status."""
         belief.confidence = min(1.0, belief.confidence + 0.2)
         belief.status = self.engine.belief_status(belief.confidence)
-        
-        self._log_to_history(
-            belief,
-            f"upgraded_from_{old_status}_{reason}"
-        )
-        
+        self._log_to_history(belief, f"upgrade:{reason}")
         return belief
