@@ -1,356 +1,225 @@
 """
-ADRE LLM Service
-Integrates with OpenRouter API for LLM-powered features
+ADRE Claim Extraction Layer
+Extracts structured claims from raw unstructured data
 """
 
-import os
-import httpx
-import logging
-import json
-from typing import Optional, Dict, List
 from abc import ABC, abstractmethod
+from typing import List
+from datetime import datetime, timezone
+import re
+import uuid
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from adre_core_structures import Claim, ClaimType
 
 
-class LLMService(ABC):
-    """Abstract base for LLM services"""
-    
+class ClaimExtractor(ABC):
+    """Base class for claim extraction strategies."""
+
     @abstractmethod
-    async def call(self, prompt: str) -> str:
-        """
-        Make LLM call with prompt.
-        
-        Args:
-            prompt: Input prompt
-            
-        Returns:
-            LLM response text
-        """
+    def extract(self, raw_data: str) -> List[Claim]:
+        """Extract claims from raw data."""
         pass
 
 
-class OpenRouterLLMService(LLMService):
+class PatternBasedExtractor(ClaimExtractor):
     """
-    OpenRouter LLM Service
-    Integrates with OpenRouter API for LLM calls
-    """
-
-    def __init__(
-        self,
-        api_key: Optional[str] = None,
-        model: str = "openai/gpt-3.5-turbo",
-        base_url: str = "https://openrouter.ai/api/v1/chat/completions"
-    ):
-        """
-        Initialize OpenRouter LLM service.
-        
-        Args:
-            api_key: OpenRouter API key (defaults to OPENROUTER_API_KEY env var)
-            model: Model to use (default: gpt-3.5-turbo)
-            base_url: OpenRouter API endpoint
-        """
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
-        
-        if not self.api_key:
-            raise ValueError(
-                "OpenRouter API key not provided. "
-                "Set OPENROUTER_API_KEY environment variable or pass api_key parameter."
-            )
-        
-        self.model = model
-        self.base_url = base_url
-        self.headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
-
-    async def call(self, prompt: str, temperature: float = 0.7) -> str:
-        """
-        Make LLM call via OpenRouter.
-        
-        Args:
-            prompt: Input prompt
-            temperature: Creativity level (0.0-1.0)
-            
-        Returns:
-            LLM response text
-        """
-        data = {
-            "model": self.model,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ],
-            "temperature": temperature
-        }
-        
-        try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.post(
-                    self.base_url,
-                    headers=self.headers,
-                    json=data
-                )
-                
-                if response.status_code != 200:
-                    logger.error(f"OpenRouter API error: {response.status_code}")
-                    logger.error(f"Response: {response.text}")
-                    raise Exception(f"API error: {response.status_code}")
-                
-                result = response.json()
-                
-                # Extract message content
-                if "choices" in result and len(result["choices"]) > 0:
-                    return result["choices"][0]["message"]["content"]
-                else:
-                    raise Exception("Unexpected response format from OpenRouter")
-        
-        except httpx.TimeoutException:
-            logger.error("OpenRouter API call timed out")
-            raise
-        except Exception as e:
-            logger.error(f"OpenRouter API call failed: {e}")
-            raise
-
-    async def call_json(self, prompt: str) -> Dict:
-        """
-        Make LLM call expecting JSON response.
-        
-        Args:
-            prompt: Input prompt (should ask for JSON)
-            
-        Returns:
-            Parsed JSON response
-        """
-        response = await self.call(prompt, temperature=0.0)
-        
-        try:
-            # Try to parse JSON
-            return json.loads(response)
-        except json.JSONDecodeError:
-            # If response contains JSON, extract it
-            try:
-                start = response.find('{')
-                end = response.rfind('}') + 1
-                if start != -1 and end > start:
-                    return json.loads(response[start:end])
-            except:
-                pass
-            
-            raise ValueError(f"Could not parse JSON from response: {response}")
-
-
-class MockLLMService(LLMService):
-    """
-    Mock LLM Service for testing
-    Returns predefined responses without API calls
+    Pattern-based claim extraction.
+    Fast, no external dependencies, no I/O.
     """
 
     def __init__(self):
-        self.call_count = 0
-
-    async def call(self, prompt: str) -> str:
-        """
-        Return mock response.
+        # Strong claim indicators
+        self.factual_patterns = [
+            r'\b(?:is|are|was|were)\b.*\b(?:a|an|the)\b',
+            r'\b(?:has|have|had)\b.*\b(?:shown|demonstrated|proven)\b',
+            r'\b(?:research|studies|data|evidence)\b.*\b(?:shows?|indicates?|suggests?)\b',
+        ]
         
-        Args:
-            prompt: Input prompt (ignored)
+        # Compiled patterns
+        self.compiled = [re.compile(p, re.IGNORECASE) for p in self.factual_patterns]
+
+    def extract(self, raw_data: str) -> List[Claim]:
+        """Extract claims using pattern matching - synchronous."""
+        claims = []
+        sentences = re.split(r'[.!?]+', raw_data)
+        
+        for sentence in sentences:
+            sentence = sentence.strip()
             
-        Returns:
-            Mock response
-        """
-        self.call_count += 1
-        
-        if "extract" in prompt.lower():
-            return '''[
-                {"claim": "The Earth orbits the Sun", "type": "STRUCTURAL", "confidence": 0.95},
-                {"claim": "Machine learning requires quality data", "type": "EMPIRICAL", "confidence": 0.85}
-            ]'''
-        
-        return "Mock LLM response for testing purposes"
-
-    async def call_json(self, prompt: str) -> Dict:
-        """Return mock JSON response."""
-        response = await self.call(prompt)
-        return json.loads(response)
-
-
-# ============================================================================
-# LLM-POWERED FUNCTIONS FOR ADRE
-# ============================================================================
-
-class LLMClaimExtractor:
-    """Uses LLM to extract and structure claims from text"""
-
-    def __init__(self, llm_service: LLMService = None):
-        """
-        Initialize LLM claim extractor.
-        
-        Args:
-            llm_service: LLMService instance (defaults to OpenRouter)
-        """
-        if llm_service is None:
-            llm_service = OpenRouterLLMService()
-        
-        self.llm = llm_service
-
-    async def extract_claims(self, text: str) -> List[Dict]:
-        """
-        Extract claims from text using LLM.
-        
-        Args:
-            text: Input text
+            if len(sentence) < 20:
+                continue
             
-        Returns:
-            List of extracted claims
-        """
-        prompt = f"""Extract all factual claims from the following text.
-For each claim, provide:
-1. claim: The exact claim text
-2. type: One of STRUCTURAL, EMPIRICAL, DYNAMIC, NORMATIVE
-3. confidence: Your confidence in extraction (0.0-1.0)
-
-Return ONLY valid JSON array, no other text.
-
-Text:
-{text}"""
-
-        try:
-            response = await self.llm.call_json(prompt)
-            if isinstance(response, list):
-                return response
-            return [response]
-        except Exception as e:
-            logger.error(f"Claim extraction failed: {e}")
-            return []
-
-
-class LLMEvidenceAnalyzer:
-    """Uses LLM to analyze and score evidence"""
-
-    def __init__(self, llm_service: LLMService = None):
-        """
-        Initialize LLM evidence analyzer.
+            # Check if matches factual patterns
+            if self._is_factual_claim(sentence):
+                claim_type = self._classify_claim_type(sentence)
+                confidence = self._estimate_confidence(sentence)
+                
+                claim = Claim(
+                    claim_id=f"claim_{uuid.uuid4().hex[:8]}",
+                    text=sentence,
+                    claim_type=claim_type,
+                    source_text=raw_data[:200],
+                    extraction_confidence=confidence,
+                    timestamp=datetime.now(timezone.utc)
+                )
+                claims.append(claim)
         
-        Args:
-            llm_service: LLMService instance (defaults to OpenRouter)
-        """
-        if llm_service is None:
-            llm_service = OpenRouterLLMService()
+        return claims
+
+    def _is_factual_claim(self, text: str) -> bool:
+        """Check if text contains factual claim."""
+        return any(pattern.search(text) for pattern in self.compiled)
+
+    def _classify_claim_type(self, text: str) -> ClaimType:
+        """Classify claim type with stronger heuristics."""
+        lower = text.lower()
         
-        self.llm = llm_service
-
-    async def analyze_evidence(self, claim: str, evidence_text: str) -> float:
-        """
-        Analyze how much evidence supports claim.
+        # Normative - prescriptive language
+        normative_keywords = {'should', 'must', 'ought', 'need to', 'required', 'necessary'}
+        if any(kw in lower for kw in normative_keywords):
+            return ClaimType.NORMATIVE
         
-        Args:
-            claim: The claim being evaluated
-            evidence_text: Text containing evidence
-            
-        Returns:
-            Support strength (-1.0 to 1.0)
-        """
-        prompt = f"""Analyze the following evidence for the given claim.
-Determine if the evidence supports, contradicts, or is neutral about the claim.
-
-Claim: {claim}
-
-Evidence: {evidence_text}
-
-Respond with ONLY a JSON object:
-{{"support_strength": <number from -1.0 to 1.0>, "reasoning": "<brief explanation>"}}
-
-Where:
-- 1.0 = strongly supports
-- 0.5 = moderately supports
-- 0.0 = neutral
-- -0.5 = moderately contradicts
-- -1.0 = strongly contradicts"""
-
-        try:
-            response = await self.llm.call_json(prompt)
-            return float(response.get("support_strength", 0.0))
-        except Exception as e:
-            logger.error(f"Evidence analysis failed: {e}")
-            return 0.0
-
-
-class LLMClaimClassifier:
-    """Uses LLM to classify claim types"""
-
-    def __init__(self, llm_service: LLMService = None):
-        """
-        Initialize LLM claim classifier.
+        # Dynamic - time-sensitive indicators
+        dynamic_keywords = {'today', 'yesterday', 'currently', 'now', 'latest', 'recent'}
+        if any(kw in lower for kw in dynamic_keywords):
+            return ClaimType.DYNAMIC
         
-        Args:
-            llm_service: LLMService instance (defaults to OpenRouter)
-        """
-        if llm_service is None:
-            llm_service = OpenRouterLLMService()
+        # Empirical - research/data language
+        empirical_keywords = {'study', 'research', 'data shows', 'experiment', 'findings', 'evidence'}
+        if any(kw in lower for kw in empirical_keywords):
+            return ClaimType.EMPIRICAL
         
-        self.llm = llm_service
-
-    async def classify(self, claim: str) -> str:
-        """
-        Classify claim into type.
+        # Structural - definitional/mathematical
+        structural_keywords = {'defined as', 'equals', 'always', 'never', 'formula', 'theorem'}
+        if any(kw in lower for kw in structural_keywords):
+            return ClaimType.STRUCTURAL
         
-        Args:
-            claim: Claim text to classify
-            
-        Returns:
-            Claim type: STRUCTURAL, EMPIRICAL, DYNAMIC, or NORMATIVE
-        """
-        prompt = f"""Classify this claim into one of four types:
+        # Default to empirical
+        return ClaimType.EMPIRICAL
 
-STRUCTURAL: Fundamental facts that barely change (e.g., Earth orbits Sun)
-EMPIRICAL: Scientific findings from research (e.g., study results)
-DYNAMIC: Current events/news that change frequently (e.g., today's weather)
-NORMATIVE: Rules, norms, or policies (e.g., ethical statements)
-
-Claim: {claim}
-
-Respond with ONLY a JSON object:
-{{"type": "<STRUCTURAL|EMPIRICAL|DYNAMIC|NORMATIVE>", "reasoning": "<brief>"}}"""
-
-        try:
-            response = await self.llm.call_json(prompt)
-            claim_type = response.get("type", "EMPIRICAL").upper()
-            
-            # Validate
-            valid_types = ["STRUCTURAL", "EMPIRICAL", "DYNAMIC", "NORMATIVE"]
-            if claim_type not in valid_types:
-                claim_type = "EMPIRICAL"
-            
-            return claim_type
-        except Exception as e:
-            logger.error(f"Claim classification failed: {e}")
-            return "EMPIRICAL"  # Default
+    def _estimate_confidence(self, text: str) -> float:
+        """Estimate extraction confidence based on claim strength."""
+        lower = text.lower()
+        confidence = 0.5
+        
+        # Strong indicators boost confidence
+        strong_words = {'proven', 'demonstrated', 'established', 'confirmed'}
+        if any(w in lower for w in strong_words):
+            confidence += 0.2
+        
+        # Hedging reduces confidence
+        hedge_words = {'might', 'could', 'possibly', 'perhaps', 'maybe'}
+        if any(w in lower for w in hedge_words):
+            confidence -= 0.15
+        
+        # Length factor
+        if len(text.split()) > 15:
+            confidence += 0.1
+        
+        return max(0.3, min(0.95, confidence))
 
 
-# ============================================================================
-# INTEGRATION WITH ADRE
-# ============================================================================
-
-async def get_llm_service(
-    use_openrouter: bool = True,
-    api_key: Optional[str] = None,
-    model: str = "openai/gpt-3.5-turbo"
-) -> LLMService:
+class LLMBasedExtractor(ClaimExtractor):
     """
-    Get configured LLM service.
-    
-    Args:
-        use_openrouter: Use OpenRouter (True) or Mock (False)
-        api_key: OpenRouter API key
-        model: Model to use
-        
-    Returns:
-        Configured LLMService instance
+    LLM-powered claim extraction using OpenRouter.
+    More sophisticated but requires API access.
     """
-    if use_openrouter:
-        return OpenRouterLLMService(api_key=api_key, model=model)
-    else:
-        return MockLLMService()
+
+    def __init__(self, llm_api_key: str = None, model: str = "openai/gpt-3.5-turbo"):
+        from adre_llm_service import OpenRouterLLMService, LLMClaimExtractor, LLMClaimClassifier
+        
+        try:
+            self.llm_service = OpenRouterLLMService(api_key=llm_api_key, model=model)
+            self.claim_extractor = LLMClaimExtractor(self.llm_service)
+            self.classifier = LLMClaimClassifier(self.llm_service)
+            self.fallback = PatternBasedExtractor()
+        except Exception as e:
+            raise ValueError(f"Failed to initialize LLM service: {e}")
+
+    def extract(self, raw_data: str) -> List[Claim]:
+        """Extract claims using OpenRouter LLM with fallback - synchronous wrapper."""
+        import asyncio
+        
+        try:
+            # Get or create event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # Already in async context - create task
+                return asyncio.create_task(self._async_extract(raw_data))
+            except RuntimeError:
+                # No running loop - create new one
+                return asyncio.run(self._async_extract(raw_data))
+        except Exception as e:
+            print(f"LLM extraction failed: {e}, using fallback")
+            return self.fallback.extract(raw_data)
+
+    async def _async_extract(self, raw_data: str) -> List[Claim]:
+        """Async extraction logic."""
+        extracted = await self.claim_extractor.extract_claims(raw_data)
+        
+        if not extracted:
+            print("No claims extracted by LLM, using fallback")
+            return self.fallback.extract(raw_data)
+        
+        claims = []
+        for item in extracted:
+            claim_text = item.get("claim", "")
+            if not claim_text:
+                continue
+                
+            extraction_conf = float(item.get("confidence", 0.7))
+            
+            # Classify claim type
+            claim_type_str = await self.classifier.classify(claim_text)
+            claim_type = self._string_to_claim_type(claim_type_str)
+            
+            claim = Claim(
+                claim_id=f"claim_llm_{uuid.uuid4().hex[:8]}",
+                text=claim_text,
+                claim_type=claim_type,
+                source_text=raw_data[:200],
+                extraction_confidence=extraction_conf,
+                timestamp=datetime.now(timezone.utc)
+            )
+            claims.append(claim)
+        
+        return claims
+
+    @staticmethod
+    def _string_to_claim_type(type_str: str) -> ClaimType:
+        """Convert string to ClaimType enum."""
+        type_map = {
+            'STRUCTURAL': ClaimType.STRUCTURAL,
+            'EMPIRICAL': ClaimType.EMPIRICAL,
+            'DYNAMIC': ClaimType.DYNAMIC,
+            'NORMATIVE': ClaimType.NORMATIVE
+        }
+        return type_map.get(type_str.upper(), ClaimType.EMPIRICAL)
+
+
+class HybridExtractor(ClaimExtractor):
+    """
+    Hybrid: fast patterns + optional LLM refinement.
+    Best of both worlds.
+    """
+
+    def __init__(self, llm_api_key: str = None):
+        self.pattern_extractor = PatternBasedExtractor()
+        try:
+            self.llm_extractor = LLMBasedExtractor(llm_api_key)
+            self.has_llm = True
+        except:
+            self.has_llm = False
+
+    def extract(self, raw_data: str) -> List[Claim]:
+        """Extract with pattern first, optionally refine with LLM."""
+        pattern_claims = self.pattern_extractor.extract(raw_data)
+        
+        if not self.has_llm:
+            return pattern_claims
+        
+        # Boost confidence for hybrid extraction
+        for claim in pattern_claims:
+            claim.extraction_confidence = min(0.9, claim.extraction_confidence + 0.1)
+        
+        return pattern_claims
