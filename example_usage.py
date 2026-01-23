@@ -25,7 +25,6 @@ async def example_basic():
     print("EXAMPLE 1: Basic Pipeline")
     print("="*70)
     
-    # Initialize with defaults
     pipeline = ADREPipeline(min_confidence=0.3)
     
     raw_data = """
@@ -38,17 +37,14 @@ async def example_basic():
     COVID-19 emerged in late 2019. The pandemic affected global society profoundly.
     """
     
-    # Process data
     beliefs = await pipeline.process_raw_data(raw_data)
-    
-    # Export results
     results = pipeline.export_results()
     
     print("\nExported Results:")
     print(json.dumps({
-        'total': results['total_processed'],
+        'total': results['total'],
         'by_status': results['by_status'],
-        'stats': results['statistics']
+        'stats': results['stats']
     }, indent=2))
 
 
@@ -62,9 +58,8 @@ async def example_custom():
     print("EXAMPLE 2: Custom Configuration")
     print("="*70)
     
-    # Use custom components
     extractor = PatternBasedExtractor()
-    validator = MultiSourceValidator()  # Combines multiple validators
+    validator = MultiSourceValidator()
     belief_manager = BeliefManager()
     
     pipeline = ADREPipeline(
@@ -84,7 +79,6 @@ async def example_custom():
     
     beliefs = await pipeline.process_raw_data(raw_data, verbose=True)
     
-    # Get specific data formats
     training_data = pipeline.get_training_data()
     print(f"\n✓ Generated {len(training_data)} training-ready items")
 
@@ -115,7 +109,6 @@ async def example_analysis():
     
     beliefs = await pipeline.process_raw_data(raw_data, verbose=False)
     
-    # Analyze by status
     print("\nAnalysis by Status:")
     for status in ['stable', 'contextual', 'speculative', 'rejected']:
         beliefs_with_status = pipeline.get_beliefs_by_status(status)
@@ -127,12 +120,11 @@ async def example_analysis():
                 print(f"    Evidence: {len(belief.evidence)} sources, "
                       f"{belief.contradiction_count} contradictions")
     
-    # Statistics
     stats = pipeline.get_statistics()
     print(f"\nPipeline Statistics:")
-    print(f"  Average Confidence: {stats['average_confidence']:.3f}")
+    print(f"  Average Confidence: {stats['avg_confidence']:.3f}")
     print(f"  Acceptance Rate: {stats['acceptance_rate']:.1%}")
-    print(f"  Avg Evidence: {stats['average_evidence_count']}")
+    print(f"  Avg Evidence: {stats['avg_evidence']}")
 
 
 # ============================================================================
@@ -147,7 +139,6 @@ async def example_batch():
     
     pipeline = ADREPipeline(min_confidence=0.4)
     
-    # Multiple documents
     documents = [
         "Python was created by Guido van Rossum in 1991. It has become very popular.",
         "The Great Wall of China is one of the most impressive structures ever built.",
@@ -162,8 +153,7 @@ async def example_batch():
         results = pipeline.export_results()
         all_results.append(results)
     
-    # Summary
-    total_claims = sum(r['total_processed'] for r in all_results)
+    total_claims = sum(r['total'] for r in all_results)
     total_training = sum(len(r['training_data']) for r in all_results)
     
     print(f"\n✓ Processed {len(documents)} documents")
@@ -193,17 +183,15 @@ async def example_export():
     
     await pipeline.process_raw_data(raw_data, verbose=False)
     
-    # Export as JSON
     training_json = pipeline.get_training_data_json(pretty=True)
     
     print("\nTraining Data (JSON):")
     print(training_json)
     
-    # Export complete results
     results = pipeline.export_results()
     print(f"\nComplete Results Export:")
     print(f"  Timestamp: {results['timestamp']}")
-    print(f"  Total Processed: {results['total_processed']}")
+    print(f"  Total Processed: {results['total']}")
     print(f"  Status Breakdown: {results['by_status']}")
 
 
@@ -227,7 +215,6 @@ async def example_history():
     
     beliefs = await pipeline.process_raw_data(raw_data, verbose=False)
     
-    # Show history for each belief
     print("\nBelief History:")
     for belief in beliefs:
         print(f"\nClaim: {belief.claim.text[:50]}...")
@@ -236,11 +223,12 @@ async def example_history():
         
         if belief.history:
             print(f"History ({len(belief.history)} events):")
-            for event in belief.history[-3:]:  # Show last 3 events
-                print(f"  • {event['event']}: confidence={event['confidence']:.3f}")
+            for event in belief.history[-3:]:
+                print(f"  • {event['event']}: conf={event['conf']:.3f}")
 
 
 # ============================================================================
+# EXAMPLE 7: OpenRouter LLM Integration
 # ============================================================================
 
 async def example_openrouter():
@@ -249,18 +237,13 @@ async def example_openrouter():
     print("EXAMPLE 7: OpenRouter LLM Integration")
     print("="*70)
     
-    # Check if API key is set
     if not os.getenv("OPENROUTER_API_KEY"):
         print("\n⚠️  OPENROUTER_API_KEY not set")
         print("   Set it to use real LLM extraction:")
         print("   export OPENROUTER_API_KEY='sk-...'")
-        print("\n   Using Mock LLM for demonstration instead...\n")
-        
-        # Use mock for demo
-        from adre_claim_extractor import PatternBasedExtractor
+        print("\n   Using Pattern extractor for demonstration instead...\n")
         extractor = PatternBasedExtractor()
     else:
-        # Use real OpenRouter LLM
         print("\n✓ Using OpenRouter API\n")
         extractor = LLMBasedExtractor(model="openai/gpt-3.5-turbo")
     
@@ -280,7 +263,7 @@ async def example_openrouter():
     
     beliefs = await pipeline.process_raw_data(raw_data, verbose=True)
     
-    print(f"\n✓ Processed with LLM-based extraction")
+    print(f"\n✓ Processed with extraction")
     print(f"✓ Generated {len(pipeline.get_training_data())} training-ready items")
 
 
@@ -300,7 +283,6 @@ async def example_comparison():
     The field of AI is evolving rapidly with new techniques emerging monthly.
     """
     
-    # Pattern-based
     print("\n[PATTERN-BASED]")
     pipeline1 = ADREPipeline(
         extractor=PatternBasedExtractor(),
@@ -310,10 +292,9 @@ async def example_comparison():
     beliefs1 = await pipeline1.process_raw_data(raw_data, verbose=False)
     stats1 = pipeline1.get_statistics()
     
-    print(f"Claims extracted: {stats1['total_processed']}")
-    print(f"Avg confidence: {stats1['average_confidence']:.3f}")
+    print(f"Claims extracted: {stats1['total']}")
+    print(f"Avg confidence: {stats1['avg_confidence']:.3f}")
     
-    # LLM-based (if available)
     if os.getenv("OPENROUTER_API_KEY"):
         print("\n[LLM-BASED]")
         pipeline2 = ADREPipeline(
@@ -324,84 +305,85 @@ async def example_comparison():
         beliefs2 = await pipeline2.process_raw_data(raw_data, verbose=False)
         stats2 = pipeline2.get_statistics()
         
-        print(f"Claims extracted: {stats2['total_processed']}")
-        print(f"Avg confidence: {stats2['average_confidence']:.3f}")
+        print(f"Claims extracted: {stats2['total']}")
+        print(f"Avg confidence: {stats2['avg_confidence']:.3f}")
     else:
         print("\n⚠️  OpenRouter API key not set, skipping LLM comparison")
 
+
 # ============================================================================
-# EXAMPLE 9: Wikipedia Dataset Integration (Modern HF Dataset)
+# EXAMPLE 9: AG News Dataset Integration (Better Choice)
 # ============================================================================
 
-from datasets import load_dataset
-
-async def example_wikipedia():
-    """Example processing AG news dataset with ADRE."""
+async def example_agnews():
+    """Example processing AG News dataset with ADRE."""
     print("\n" + "="*70)
-    print("EXAMPLE 9: Wikipedia Dataset Integration")
+    print("EXAMPLE 9: AG News Dataset Integration")
     print("="*70)
 
-    # Initialize pipeline
+    try:
+        from datasets import load_dataset
+    except ImportError:
+        print("\n⚠️  'datasets' library not installed")
+        print("   Install it with: pip install datasets")
+        print("   Skipping this example...\n")
+        return
+
     pipeline = ADREPipeline(min_confidence=0.6)
 
-    # Load modern, script-free Wikipedia dataset (Parquet-based)
-    print("\nLoading Tweet dataset...")
-    raw_ds = load_dataset(
-        "civil_comments",
-        split="train[:300]"   # small, fast, enough signal
-    )
+    print("\nLoading AG News dataset...")
+    
+    # AG News: news articles with categories (World, Sports, Business, Sci/Tech)
+    # Much better for factual claim extraction than toxic comments
+    dataset = load_dataset("ag_news", split="train[:100]")
+    
+    # Extract text from articles
+    texts = [item['text'] for item in dataset]
+    raw_text = "\n\n".join(texts)
 
-    # Materialize text column into a concrete list[str]
-    texts: list[str] = list(raw_ds["text"])
-
-    # Preserve document boundaries
-    raw_text = "\n\n \n\n".join(texts)
-
-    print(f"✓ Loaded {len(texts)} articles")
+    print(f"✓ Loaded {len(texts)} news articles")
     print(f"✓ Raw text size: {len(raw_text):,} characters")
     print(f"✓ Raw token estimate: {len(raw_text.split()):,}")
 
     # Process with ADRE
     beliefs = await pipeline.process_raw_data(raw_text, verbose=False)
 
-    # Collect statistics
+    # Statistics
     stats = pipeline.get_statistics()
     training_data = pipeline.get_training_data()
 
-    # Reduction metrics (use internal Belief objects)
-    filtered_char_size = sum(len(belief.claim.text) for belief in beliefs)
-    filtered_token_size = sum(len(belief.claim.text.split()) for belief in beliefs)
+    # Reduction metrics
+    filtered_chars = sum(len(b.claim.text) for b in beliefs)
+    filtered_tokens = sum(len(b.claim.text.split()) for b in beliefs)
 
     print("\nResults Summary:")
-    print(f"  Total Claims Processed: {stats['total_processed']}")
+    print(f"  Total Claims Processed: {stats['total']}")
     print(f"  Stable: {stats['stable']}")
     print(f"  Contextual: {stats['contextual']}")
     print(f"  Speculative: {stats['speculative']}")
     print(f"  Rejected: {stats['rejected']}")
-    print(f"  Average Confidence: {stats['average_confidence']:.3f}")
+    print(f"  Average Confidence: {stats['avg_confidence']:.3f}")
     print(f"  Acceptance Rate: {stats['acceptance_rate']:.1%}")
     print(f"  Training-Ready Items: {len(training_data)}")
 
     print("\nData Reduction:")
     print(f"  Raw Size (chars): {len(raw_text):,}")
-    print(f"  Filtered Size (chars): {filtered_char_size:,}")
-    print(f"  Char Reduction Ratio: {filtered_char_size / len(raw_text):.3f}")
+    print(f"  Filtered Size (chars): {filtered_chars:,}")
+    print(f"  Char Reduction Ratio: {filtered_chars / len(raw_text):.3f}")
 
     print(f"  Raw Tokens (approx): {len(raw_text.split()):,}")
-    print(f"  Filtered Tokens: {filtered_token_size:,}")
-    print(f"  Token Reduction Ratio: {filtered_token_size / len(raw_text.split()):.3f}")
+    print(f"  Filtered Tokens: {filtered_tokens:,}")
+    print(f"  Token Reduction Ratio: {filtered_tokens / len(raw_text.split()):.3f}")
 
-    # Show sample validated beliefs (object-level)
     print("\nSample Validated Claims:")
     for belief in beliefs[:5]:
         print(f"  • {belief.claim.text[:80]}...")
-        print(
-            f"    Confidence: {belief.confidence:.3f}, "
-            f"Evidence: {len(belief.evidence)} sources, "
-            f"Status: {belief.status}"
-        )
+        print(f"    Confidence: {belief.confidence:.3f}, "
+              f"Evidence: {len(belief.evidence)} sources, "
+              f"Status: {belief.status}")
 
-    print("\n✓ Wikipedia example completed successfully")
+    print("\n✓ AG News example completed successfully")
+
 
 # ============================================================================
 # MAIN RUNNER
@@ -413,7 +395,6 @@ async def main():
     print("ADRE PIPELINE - EXAMPLES AND DEMONSTRATIONS")
     print("="*80)
     
-    # Run examples
     await example_basic()
     await example_custom()
     await example_analysis()
@@ -422,7 +403,8 @@ async def main():
     await example_history()
     await example_openrouter()
     await example_comparison()
-    await example_wikipedia()
+    await example_agnews()
+    
     print("\n" + "="*80)
     print("✓ All examples completed successfully")
     print("="*80 + "\n")

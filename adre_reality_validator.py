@@ -7,294 +7,167 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
 from datetime import datetime, timezone
 import asyncio
-import random
 
-from adre_core_structures import Evidence, Claim
+from adre_core_structures import Evidence, Claim, ClaimType
 
 
 class RealityValidator(ABC):
-    """
-    Abstract base class for reality validation strategies.
-    Implementers gather evidence from various sources to validate claims.
-    """
+    """Base class for reality validation strategies."""
 
     @abstractmethod
     async def validate(self, claim: Claim) -> List[Evidence]:
-        """
-        Validate claim against reality sources.
-        
-        Args:
-            claim: Claim to validate
-            
-        Returns:
-            List of Evidence objects (supporting or contradicting)
-        """
+        """Validate claim against reality sources."""
         pass
 
 
 class MockValidator(RealityValidator):
     """
-    Mock validator for testing and demonstration.
-    Simulates evidence gathering without real API calls.
+    Deterministic mock validator for testing.
+    Generates reproducible evidence based on claim characteristics.
     """
 
-    def __init__(self):
-        self.mock_sources = {
-            'official_db': {'type': 'official', 'reliability': 0.95},
-            'academic_journal': {'type': 'academic', 'reliability': 0.90},
-            'news_outlet_1': {'type': 'news', 'reliability': 0.75},
-            'news_outlet_2': {'type': 'news', 'reliability': 0.75},
-            'government_api': {'type': 'official', 'reliability': 0.92},
-            'sensor_network': {'type': 'api', 'reliability': 0.88},
-            'social_media': {'type': 'social_media', 'reliability': 0.30},
-        }
-
-    async def validate(self, claim: Claim) -> List[Evidence]:
+    def __init__(self, seed: int = 42):
         """
-        Simulate evidence collection.
+        Initialize mock validator.
         
         Args:
-            claim: Claim to validate
-            
-        Returns:
-            List of simulated Evidence objects
+            seed: Seed for deterministic behavior (not used for random, but for hashing)
         """
+        self.seed = seed
+        self.sources = [
+            ('official_db', 'official', 0.95),
+            ('academic_journal', 'academic', 0.90),
+            ('news_outlet_1', 'news', 0.75),
+            ('news_outlet_2', 'news', 0.75),
+            ('government_api', 'official', 0.92),
+        ]
+
+    async def validate(self, claim: Claim) -> List[Evidence]:
+        """Generate deterministic evidence based on claim hash."""
         evidence_list = []
         
-        # Simulate checking multiple sources
-        num_sources = random.randint(2, 5)
-        selected_sources = random.sample(
-            list(self.mock_sources.items()),
-            min(num_sources, len(self.mock_sources))
-        )
+        # Deterministic selection based on claim text hash
+        text_hash = hash(claim.text) % 100
+        num_sources = 2 + (text_hash % 4)  # 2-5 sources
         
-        for source_id, source_info in selected_sources:
-            # Simulate evidence with realistic distribution
-            support_strength = self._generate_support_strength()
+        for i in range(min(num_sources, len(self.sources))):
+            source_id, source_type, reliability = self.sources[i]
+            
+            # Deterministic support strength
+            support = self._compute_support(claim, i, text_hash)
             
             evidence = Evidence(
-                source_id=source_id,
-                source_type=source_info['type'],
-                support_strength=support_strength,
-                reliability_score=source_info['reliability'],
+                source_id=f"{source_id}_{i}",
+                source_type=source_type,
+                support_strength=support,
+                reliability_score=reliability,
                 timestamp=datetime.now(timezone.utc),
-                content=f"Evidence from {source_id} relevant to: {claim.text[:50]}"
+                content=f"Evidence from {source_id}: {claim.text[:50]}"
             )
             evidence_list.append(evidence)
         
         return evidence_list
 
-    def _generate_support_strength(self) -> float:
-        """
-        Generate realistic support strength distribution.
-        Most evidence supports, few contradict.
+    def _compute_support(self, claim: Claim, source_idx: int, text_hash: int) -> float:
+        """Compute deterministic support strength based on claim type and hash."""
+        # Base support depends on claim type
+        type_base = {
+            ClaimType.STRUCTURAL: 0.8,
+            ClaimType.EMPIRICAL: 0.6,
+            ClaimType.DYNAMIC: 0.4,
+            ClaimType.NORMATIVE: 0.5
+        }
+        base = type_base.get(claim.claim_type, 0.5)
         
-        Returns:
-            Support strength (-1.0 to 1.0)
-        """
-        rand = random.random()
+        # Vary by source (deterministic)
+        variation = ((text_hash + source_idx * 17) % 40 - 20) / 100  # -0.2 to +0.2
+        support = base + variation
         
-        # 80% supporting evidence
-        if rand < 0.80:
-            return random.uniform(0.5, 1.0)
-        # 10% neutral
-        elif rand < 0.90:
-            return random.uniform(-0.1, 0.1)
-        # 10% contradicting
-        else:
-            return random.uniform(-0.8, -0.3)
+        # 10% chance of contradiction (deterministic)
+        if (text_hash + source_idx) % 10 == 0:
+            support = -0.5 - (text_hash % 30) / 100
+        
+        return max(-1.0, min(1.0, support))
 
 
 class WebSearchValidator(RealityValidator):
     """
-    Validates claims by searching the web.
-    Integrates with web search APIs (Google, Bing, etc.)
-    Uses LLM to analyze search results for evidence.
+    Web search validation (placeholder - requires implementation).
     """
 
-    def __init__(self, search_api_key: str = None, llm_service = None, max_sources: int = 5):
-        """
-        Initialize web search validator.
-        
-        Args:
-            search_api_key: API key for search service
-            llm_service: LLMService instance for analyzing results
-            max_sources: Maximum sources to check per claim
-        """
+    def __init__(self, search_api_key: str = None, llm_service=None, max_sources: int = 5):
         self.api_key = search_api_key
         self.max_sources = max_sources
         self.llm_service = llm_service
-        
-        if llm_service is None:
-            try:
-                from adre_llm_service import OpenRouterLLMService, LLMEvidenceAnalyzer
-                self.llm_service = OpenRouterLLMService()
-                self.evidence_analyzer = LLMEvidenceAnalyzer(self.llm_service)
-            except:
-                self.evidence_analyzer = None
+        self.enabled = False  # Not implemented yet
 
     async def validate(self, claim: Claim) -> List[Evidence]:
-        """
-        Search web for evidence about claim.
-        
-        Args:
-            claim: Claim to validate
-            
-        Returns:
-            List of Evidence from web sources
-        """
-        # This would integrate with actual web search API
-        # For now, returning empty list - implementation pending
-        
-        try:
-            # Would perform: search_results = await self._web_search(claim.text)
-            # Then analyze with LLM: strength = await self.evidence_analyzer.analyze_evidence(...)
-            # Finally convert to Evidence objects
+        """Web search validation - not implemented."""
+        if not self.enabled:
             return []
-        except Exception as e:
-            print(f"Web search validation failed: {e}")
-            return []
-
-    async def _web_search(self, query: str) -> List[Dict]:
-        """
-        Perform web search (placeholder).
-        Integration point for Google Search API, Bing, or similar.
         
-        Args:
-            query: Search query
-            
-        Returns:
-            List of search results with url, title, snippet
-        """
-        # TODO: Implement with actual search API
-        # Example structure:
-        # return [
-        #     {
-        #         'url': 'https://...',
-        #         'title': '...',
-        #         'snippet': '...',
-        #         'source': 'google'
-        #     }
-        # ]
-        pass
+        # TODO: Implement web search
+        return []
 
 
 class APIValidator(RealityValidator):
     """
-    Validates claims by querying data APIs.
-    Suitable for factual data: weather, finance, sensor data, etc.
+    API-based validation (placeholder - requires implementation).
     """
 
     def __init__(self):
-        self.api_endpoints = {
-            'weather': 'https://api.weather.example.com',
-            'finance': 'https://api.finance.example.com',
-            'sensors': 'https://api.sensors.example.com',
-        }
+        self.enabled = False  # Not implemented yet
 
     async def validate(self, claim: Claim) -> List[Evidence]:
-        """
-        Validate claim against data APIs.
+        """API validation - not implemented."""
+        if not self.enabled:
+            return []
         
-        Args:
-            claim: Claim to validate
-            
-        Returns:
-            List of Evidence from APIs
-        """
-        evidence_list = []
-        
-        try:
-            # Determine which API is relevant
-            api_type = self._determine_api_type(claim.text)
-            
-            if api_type:
-                # Would call: data = await self._query_api(api_type, claim)
-                # Then convert to Evidence
-                pass
-        
-        except Exception as e:
-            print(f"API validation failed: {e}")
-        
-        return evidence_list
-
-    def _determine_api_type(self, claim_text: str) -> Optional[str]:
-        """
-        Determine which API endpoint is relevant for claim.
-        
-        Args:
-            claim_text: Claim text
-            
-        Returns:
-            API type or None
-        """
-        claim_lower = claim_text.lower()
-        
-        if any(word in claim_lower for word in ['weather', 'temperature', 'rain']):
-            return 'weather'
-        elif any(word in claim_lower for word in ['price', 'market', 'stock']):
-            return 'finance'
-        elif any(word in claim_lower for word in ['sensor', 'measurement', 'reading']):
-            return 'sensors'
-        
-        return None
+        # TODO: Implement API queries
+        return []
 
 
 class MultiSourceValidator(RealityValidator):
     """
-    Orchestrates validation across multiple validator types.
-    Combines results from web search, APIs, academic sources, etc.
+    Orchestrates validation across multiple validators.
+    Only uses enabled validators.
     """
 
-    def __init__(self):
-        self.validators = [
-            MockValidator(),  # For testing
-            WebSearchValidator(),
-            APIValidator(),
-        ]
+    def __init__(self, include_mock: bool = True):
+        self.validators = []
+        
+        if include_mock:
+            self.validators.append(MockValidator())
+        
+        # Add other validators when implemented
+        # self.validators.append(WebSearchValidator())
+        # self.validators.append(APIValidator())
 
     async def validate(self, claim: Claim) -> List[Evidence]:
-        """
-        Validate claim across multiple sources.
-        
-        Args:
-            claim: Claim to validate
-            
-        Returns:
-            Combined list of Evidence from all validators
-        """
-        all_evidence = []
+        """Validate across all enabled validators."""
+        if not self.validators:
+            # Fallback to mock if no validators
+            mock = MockValidator()
+            return await mock.validate(claim)
         
         # Run all validators in parallel
-        tasks = [
-            validator.validate(claim)
-            for validator in self.validators
-        ]
-        
+        tasks = [validator.validate(claim) for validator in self.validators]
         results = await asyncio.gather(*tasks, return_exceptions=True)
         
-        # Combine results, filtering out errors
+        # Combine results, filter errors
+        all_evidence = []
         for result in results:
             if isinstance(result, Exception):
+                print(f"Validator failed: {result}")
                 continue
             all_evidence.extend(result)
         
-        # Deduplicate evidence from same source
-        unique_evidence = self._deduplicate(all_evidence)
-        
-        return unique_evidence
+        # Deduplicate by source
+        return self._deduplicate(all_evidence)
 
     @staticmethod
     def _deduplicate(evidence_list: List[Evidence]) -> List[Evidence]:
-        """
-        Remove duplicate evidence from same source.
-        
-        Args:
-            evidence_list: Evidence to deduplicate
-            
-        Returns:
-            Deduplicated evidence list
-        """
+        """Remove duplicate evidence from same source."""
         seen = set()
         unique = []
         
