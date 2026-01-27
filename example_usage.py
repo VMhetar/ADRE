@@ -1,18 +1,17 @@
 """
-ADRE Example Usage and Testing
-Demonstrates complete pipeline functionality
+ADRE Example Usage and Testing (CORRECTED VERSION)
+Demonstrates complete pipeline functionality with error handling
 """
 
 import asyncio
 import json
 import os
-from datetime import datetime
+from typing import List, Dict, Any
 
 from adre_pipeline import ADREPipeline
-from adre_claim_extractor import PatternBasedExtractor, HybridExtractor, LLMBasedExtractor
+from adre_claim_extractor import PatternBasedExtractor, LLMBasedExtractor
 from adre_reality_validator import MockValidator, MultiSourceValidator
 from adre_belief_manager import BeliefManager
-from adre_llm_service import OpenRouterLLMService, MockLLMService
 
 
 # ============================================================================
@@ -316,7 +315,11 @@ async def example_comparison():
 # ============================================================================
 
 async def example_agnews():
-    """Example processing AG News dataset with ADRE."""
+    """Example processing AG News dataset with ADRE.
+    
+    This example demonstrates processing larger datasets and computing
+    data reduction metrics with proper error handling for edge cases.
+    """
     print("\n" + "="*70)
     print("EXAMPLE 9: AG News Dataset Integration")
     print("="*70)
@@ -352,7 +355,7 @@ async def example_agnews():
     stats = pipeline.get_statistics()
     training_data = pipeline.get_training_data()
 
-    # Reduction metrics
+    # Reduction metrics with safety checks
     filtered_chars = sum(len(b.claim.text) for b in beliefs)
     filtered_tokens = sum(len(b.claim.text.split()) for b in beliefs)
 
@@ -369,11 +372,24 @@ async def example_agnews():
     print("\nData Reduction:")
     print(f"  Raw Size (chars): {len(raw_text):,}")
     print(f"  Filtered Size (chars): {filtered_chars:,}")
-    print(f"  Char Reduction Ratio: {filtered_chars / len(raw_text):.3f}")
+    
+    # FIXED: Added safety check for division by zero
+    if len(raw_text) > 0:
+        char_ratio = filtered_chars / len(raw_text)
+        print(f"  Char Reduction Ratio: {char_ratio:.3f}")
+    else:
+        print(f"  Char Reduction Ratio: N/A (no raw text)")
 
-    print(f"  Raw Tokens (approx): {len(raw_text.split()):,}")
+    raw_tokens = len(raw_text.split())
+    print(f"  Raw Tokens (approx): {raw_tokens:,}")
     print(f"  Filtered Tokens: {filtered_tokens:,}")
-    print(f"  Token Reduction Ratio: {filtered_tokens / len(raw_text.split()):.3f}")
+    
+    # FIXED: Added safety check for division by zero
+    if raw_tokens > 0:
+        token_ratio = filtered_tokens / raw_tokens
+        print(f"  Token Reduction Ratio: {token_ratio:.3f}")
+    else:
+        print(f"  Token Reduction Ratio: N/A (no tokens)")
 
     print("\nSample Validated Claims:")
     for belief in beliefs[:5]:
@@ -390,23 +406,62 @@ async def example_agnews():
 # ============================================================================
 
 async def main():
-    """Run all examples."""
+    """Run all examples.
+    
+    This function executes each example sequentially. Each example is
+    independent and can be run individually if needed.
+    """
     print("\n" + "="*80)
     print("ADRE PIPELINE - EXAMPLES AND DEMONSTRATIONS")
     print("="*80)
     
-    await example_basic()
-    await example_custom()
-    await example_analysis()
-    await example_batch()
-    await example_export()
-    await example_history()
-    await example_openrouter()
-    await example_comparison()
-    await example_agnews()
+    try:
+        await example_basic()
+    except Exception as e:
+        print(f"\n❌ example_basic failed: {e}")
+    
+    try:
+        await example_custom()
+    except Exception as e:
+        print(f"\n❌ example_custom failed: {e}")
+    
+    try:
+        await example_analysis()
+    except Exception as e:
+        print(f"\n❌ example_analysis failed: {e}")
+    
+    try:
+        await example_batch()
+    except Exception as e:
+        print(f"\n❌ example_batch failed: {e}")
+    
+    try:
+        await example_export()
+    except Exception as e:
+        print(f"\n❌ example_export failed: {e}")
+    
+    try:
+        await example_history()
+    except Exception as e:
+        print(f"\n❌ example_history failed: {e}")
+    
+    try:
+        await example_openrouter()
+    except Exception as e:
+        print(f"\n❌ example_openrouter failed: {e}")
+    
+    try:
+        await example_comparison()
+    except Exception as e:
+        print(f"\n❌ example_comparison failed: {e}")
+    
+    try:
+        await example_agnews()
+    except Exception as e:
+        print(f"\n❌ example_agnews failed: {e}")
     
     print("\n" + "="*80)
-    print("✓ All examples completed successfully")
+    print("✓ All examples completed")
     print("="*80 + "\n")
 
 
